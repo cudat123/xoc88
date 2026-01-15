@@ -3,27 +3,32 @@ const express = require('express');
 const cors = require('cors');
 
 // ============================================
-// HỆ THỐNG DỰ ĐOÁN TÀI XỈU NÂNG CAO
+// HỆ THỐNG DỰ ĐOÁN TÀI XỈU VỚI HỌC CẦU NÂNG CAO
 // ============================================
 class TaiXiuPredictionSystem {
     constructor() {
         this.history = [];
-        this.patterns = [];
         this.learnedPatterns = {};
+        this.learnedPatternsDetail = {};
         this.stats = {
             total_t: 0,
             total_x: 0,
             streak_t: 0,
             streak_x: 0,
             max_streak_t: 0,
-            max_streak_x: 0
+            max_streak_x: 0,
+            predictions_correct: 0,
+            predictions_total: 0
         };
-        this.loadPatternsFromCau();
+        
+        // Tải 32 cầu từ dữ liệu cung cấp
+        this.load32CauPatterns();
+        console.log(`✅ Đã tải ${Object.keys(this.learnedPatterns).length} cầu vào hệ thống`);
     }
 
-    loadPatternsFromCau() {
-        // Cầu từ dữ liệu đã cung cấp
-        const cauData = [
+    load32CauPatterns() {
+        // 32 cầu từ dữ liệu cung cấp
+        const cau32 = {
 'XTXXTXTTXXTTXX': 'X',
 'XXTXTTXXXTTXXT': 'X',
 'TXTXTTTXXTXXXT': 'T',
@@ -10024,48 +10029,58 @@ class TaiXiuPredictionSystem {
 'TTXTXTXXXTXTXX': 'X',
 'TXTTTTTTXXXXXX': 'T',
 'TXXTTTXXTTTXTT': 'T',
-        ];
+        };
 
-        // Học từ cầu
-        cauData.forEach(cau => {
-            const parts = cau.split(' - ');
-            const sequence = parts[0].split('');
-            const result = parts[1];
+        // Học từ 32 cầu
+        for (const [pattern, result] of Object.entries(cau32)) {
+            const sequence = pattern.split('');
             
-            // Thêm toàn bộ chuỗi vào lịch sử học
-            sequence.forEach(char => {
-                this.addResultToHistory(char);
-            });
-            this.addResultToHistory(result);
+            // Học toàn bộ pattern
+            this.learnPattern(sequence, result);
             
-            // Học pattern từ cầu
-            this.learnPatternsFromSequence(sequence, result);
-        });
-    }
-
-    learnPatternsFromSequence(sequence, result) {
-        // Học các pattern từ chuỗi
-        for (let length = 2; length <= 5; length++) {
-            for (let i = 0; i <= sequence.length - length; i++) {
-                const pattern = sequence.slice(i, i + length).join('');
-                const next = sequence[i + length] || result;
-                
-                if (!this.learnedPatterns[pattern]) {
-                    this.learnedPatterns[pattern] = {
-                        pattern: pattern,
-                        predictions: {},
-                        total: 0
-                    };
+            // Học các sub-pattern (từ 5 đến 15 ký tự)
+            for (let start = 0; start <= sequence.length - 5; start++) {
+                for (let length = 5; length <= Math.min(15, sequence.length - start); length++) {
+                    const subPattern = sequence.slice(start, start + length).join('');
+                    const subResult = sequence[start + length] || result;
+                    this.learnPattern(subPattern.split(''), subResult);
                 }
-                
-                if (!this.learnedPatterns[pattern].predictions[next]) {
-                    this.learnedPatterns[pattern].predictions[next] = 0;
-                }
-                
-                this.learnedPatterns[pattern].predictions[next]++;
-                this.learnedPatterns[pattern].total++;
             }
         }
+        
+        // Hiển thị thống kê ban đầu
+        console.log(`📊 Đã học ${Object.keys(this.learnedPatterns).length} patterns từ 32 cầu`);
+    }
+
+    learnPattern(sequence, result) {
+        const pattern = sequence.join('');
+        
+        if (!this.learnedPatterns[pattern]) {
+            this.learnedPatterns[pattern] = {
+                pattern: pattern,
+                total: 0,
+                t_count: 0,
+                x_count: 0
+            };
+        }
+        
+        this.learnedPatterns[pattern].total++;
+        if (result === 'T') {
+            this.learnedPatterns[pattern].t_count++;
+        } else {
+            this.learnedPatterns[pattern].x_count++;
+        }
+        
+        // Tính xác suất
+        const t_prob = this.learnedPatterns[pattern].t_count / this.learnedPatterns[pattern].total;
+        const x_prob = this.learnedPatterns[pattern].x_count / this.learnedPatterns[pattern].total;
+        
+        this.learnedPatternsDetail[pattern] = {
+            ...this.learnedPatterns[pattern],
+            t_probability: t_prob,
+            x_probability: x_prob,
+            confidence: Math.max(t_prob, x_prob)
+        };
     }
 
     addResultToHistory(result) {
