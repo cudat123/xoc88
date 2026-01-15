@@ -3,32 +3,18 @@ const express = require('express');
 const cors = require('cors');
 
 // ============================================
-// HỆ THỐNG DỰ ĐOÁN TÀI XỈU VỚI HỌC CẦU NÂNG CAO
+// HỆ THỐNG DỰ ĐOÁN ĐƠN GIẢN (CHỈ THÊM VÀO)
 // ============================================
-class TaiXiuPredictionSystem {
+class SimplePredictor {
     constructor() {
         this.history = [];
         this.learnedPatterns = {};
-        this.learnedPatternsDetail = {};
-        this.stats = {
-            total_t: 0,
-            total_x: 0,
-            streak_t: 0,
-            streak_x: 0,
-            max_streak_t: 0,
-            max_streak_x: 0,
-            predictions_correct: 0,
-            predictions_total: 0
-        };
-        
-        // Tải 32 cầu từ dữ liệu cung cấp
-        this.load32CauPatterns();
-        console.log(`✅ Đã tải ${Object.keys(this.learnedPatterns).length} cầu vào hệ thống`);
+        this.initPatterns();
     }
 
-    load32CauPatterns() {
-        // 32 cầu từ dữ liệu cung cấp
-        const cau32 = {
+    initPatterns() {
+        // 32 cầu đã học
+        const patterns = {
 'XTXXTXTTXXTTXX': 'X',
 'XXTXTTXXXTTXXT': 'X',
 'TXTXTTTXXTXXXT': 'T',
@@ -10031,282 +10017,134 @@ class TaiXiuPredictionSystem {
 'TXXTTTXXTTTXTT': 'T',
         };
 
-        // Học từ 32 cầu
-        for (const [pattern, result] of Object.entries(cau32)) {
-            const sequence = pattern.split('');
-            
-            // Học toàn bộ pattern
-            this.learnPattern(sequence, result);
-            
-            // Học các sub-pattern (từ 5 đến 15 ký tự)
-            for (let start = 0; start <= sequence.length - 5; start++) {
-                for (let length = 5; length <= Math.min(15, sequence.length - start); length++) {
-                    const subPattern = sequence.slice(start, start + length).join('');
-                    const subResult = sequence[start + length] || result;
-                    this.learnPattern(subPattern.split(''), subResult);
+        // Học từ patterns
+        Object.entries(patterns).forEach(([pattern, result]) => {
+            const seq = pattern.split('');
+            for (let i = 3; i <= seq.length; i++) {
+                const key = seq.slice(0, i).join('');
+                if (!this.learnedPatterns[key]) {
+                    this.learnedPatterns[key] = { T: 0, X: 0 };
                 }
+                if (result === 'T') this.learnedPatterns[key].T++;
+                else this.learnedPatterns[key].X++;
             }
-        }
-        
-        // Hiển thị thống kê ban đầu
-        console.log(`📊 Đã học ${Object.keys(this.learnedPatterns).length} patterns từ 32 cầu`);
+        });
     }
 
-    learnPattern(sequence, result) {
-        const pattern = sequence.join('');
-        
-        if (!this.learnedPatterns[pattern]) {
-            this.learnedPatterns[pattern] = {
-                pattern: pattern,
-                total: 0,
-                t_count: 0,
-                x_count: 0
-            };
-        }
-        
-        this.learnedPatterns[pattern].total++;
-        if (result === 'T') {
-            this.learnedPatterns[pattern].t_count++;
-        } else {
-            this.learnedPatterns[pattern].x_count++;
-        }
-        
-        // Tính xác suất
-        const t_prob = this.learnedPatterns[pattern].t_count / this.learnedPatterns[pattern].total;
-        const x_prob = this.learnedPatterns[pattern].x_count / this.learnedPatterns[pattern].total;
-        
-        this.learnedPatternsDetail[pattern] = {
-            ...this.learnedPatterns[pattern],
-            t_probability: t_prob,
-            x_probability: x_prob,
-            confidence: Math.max(t_prob, x_prob)
-        };
-    }
-
-    addResultToHistory(result) {
+    addResult(result) {
         this.history.push(result);
-        
-        // Cập nhật thống kê
-        if (result === 'T') {
-            this.stats.total_t++;
-            this.stats.streak_t++;
-            this.stats.streak_x = 0;
-            this.stats.max_streak_t = Math.max(this.stats.max_streak_t, this.stats.streak_t);
-        } else {
-            this.stats.total_x++;
-            this.stats.streak_x++;
-            this.stats.streak_t = 0;
-            this.stats.max_streak_x = Math.max(this.stats.max_streak_x, this.stats.streak_x);
-        }
-        
-        // Giới hạn lịch sử
-        if (this.history.length > 100) {
-            const removed = this.history.shift();
-            if (removed === 'T') this.stats.total_t--;
-            else this.stats.total_x--;
+        if (this.history.length > 50) {
+            this.history.shift();
         }
     }
 
-    addRealResult(result) {
-        this.addResultToHistory(result);
-        
-        // Học từ lịch sử thực tế
-        if (this.history.length >= 5) {
-            const recent = this.history.slice(-6); // 5 phiên trước + kết quả hiện tại
-            const sequence = recent.slice(0, -1);
-            const actualResult = recent[recent.length - 1];
-            this.learnPatternsFromSequence(sequence, actualResult);
-        }
-    }
-
-    predictNext() {
+    predict() {
         if (this.history.length < 3) {
             return {
-                prediction: null,
-                confidence: 0,
-                reason: "Chưa đủ dữ liệu lịch sử",
+                du_doan: 'đang phân tích',
+                do_tin_cay: 0,
+                ly_do: 'Chưa đủ dữ liệu',
                 ty_le_tai: 50,
                 ty_le_xiu: 50
             };
         }
 
-        const recent = this.history.slice(-5);
-        let scores = { T: 0, X: 0 };
+        const recent = this.history.slice(-10);
+        let tScore = 0;
+        let xScore = 0;
         let reasons = [];
-        
-        // Rule 1: Phân tích xu hướng dài hạn
-        const total = this.stats.total_t + this.stats.total_x;
-        if (total > 10) {
-            const tRatio = this.stats.total_t / total;
-            const xRatio = this.stats.total_x / total;
-            
-            if (Math.abs(tRatio - xRatio) > 0.3) {
-                if (tRatio > xRatio) {
-                    scores.T += 30;
-                    reasons.push("Xu hướng dài hạn nghiêng Tài");
-                } else {
-                    scores.X += 30;
-                    reasons.push("Xu hướng dài hạn nghiêng Xỉu");
-                }
-            }
-        }
-        
-        // Rule 2: Phân tích streak hiện tại
-        if (this.stats.streak_t >= 3) {
-            scores.X += this.stats.streak_t * 10;
-            reasons.push(`Đang streak Tài ${this.stats.streak_t} phiên, dự đoán đảo chiều`);
-        } else if (this.stats.streak_x >= 3) {
-            scores.T += this.stats.streak_x * 10;
-            reasons.push(`Đang streak Xỉu ${this.stats.streak_x} phiên, dự đoán đảo chiều`);
-        }
-        
-        // Rule 3: So khớp pattern
-        for (let length = 5; length >= 2; length--) {
-            if (recent.length >= length) {
-                const pattern = recent.slice(-length).join('');
+
+        // Rule 1: Tìm pattern khớp
+        for (let len = 5; len >= 3; len--) {
+            if (recent.length >= len) {
+                const pattern = recent.slice(-len).join('');
                 if (this.learnedPatterns[pattern]) {
-                    const patternData = this.learnedPatterns[pattern];
-                    let totalPredictions = 0;
-                    let tPredictions = 0;
-                    let xPredictions = 0;
-                    
-                    for (const [pred, count] of Object.entries(patternData.predictions)) {
-                        totalPredictions += count;
-                        if (pred === 'T') tPredictions += count;
-                        else if (pred === 'X') xPredictions += count;
-                    }
-                    
-                    if (totalPredictions > 0) {
-                        const tProb = tPredictions / totalPredictions;
-                        const xProb = xPredictions / totalPredictions;
-                        
-                        if (tProb > xProb && tProb > 0.6) {
-                            scores.T += 40;
-                            reasons.push(`Pattern "${pattern}" thường ra Tài (${Math.round(tProb * 100)}%)`);
-                        } else if (xProb > tProb && xProb > 0.6) {
-                            scores.X += 40;
-                            reasons.push(`Pattern "${pattern}" thường ra Xỉu (${Math.round(xProb * 100)}%)`);
+                    const data = this.learnedPatterns[pattern];
+                    const total = data.T + data.X;
+                    if (total > 0) {
+                        if (data.T > data.X) {
+                            tScore += 40;
+                            reasons.push(`Pattern "${pattern}" thường ra Tài (${Math.round(data.T/total*100)}%)`);
+                        } else {
+                            xScore += 40;
+                            reasons.push(`Pattern "${pattern}" thường ra Xỉu (${Math.round(data.X/total*100)}%)`);
                         }
+                        break;
                     }
-                    break;
                 }
             }
         }
-        
-        // Rule 4: Phân tích tỷ lệ gần đây
-        const last10 = this.history.slice(-10);
-        if (last10.length >= 5) {
-            const tCount = last10.filter(x => x === 'T').length;
-            const xCount = last10.filter(x => x === 'X').length;
-            
-            if (Math.abs(tCount - xCount) >= 3) {
-                if (tCount > xCount) {
-                    scores.X += 25;
-                    reasons.push(`5 phiên gần đây ${tCount}T/${xCount}X, dự đoán cân bằng`);
-                } else {
-                    scores.T += 25;
-                    reasons.push(`5 phiên gần đây ${tCount}T/${xCount}X, dự đoán cân bằng`);
-                }
-            }
-        }
-        
-        // Rule 5: Phân tích chuỗi ngắn
+
+        // Rule 2: Phân tích streak
         const last3 = recent.slice(-3);
-        if (last3.length === 3) {
-            const tCount3 = last3.filter(x => x === 'T').length;
-            const xCount3 = last3.filter(x => x === 'X').length;
-            
-            if (tCount3 === 3) {
-                scores.X += 35;
-                reasons.push("3 phiên liên tiếp Tài, dự đoán đảo chiều");
-            } else if (xCount3 === 3) {
-                scores.T += 35;
-                reasons.push("3 phiên liên tiếp Xỉu, dự đoán đảo chiều");
-            } else if (tCount3 === 2) {
-                scores.T += 20;
-                reasons.push("2/3 phiên gần nhất là Tài");
-            } else if (xCount3 === 2) {
-                scores.X += 20;
-                reasons.push("2/3 phiên gần nhất là Xỉu");
+        const tCount3 = last3.filter(x => x === 'T').length;
+        const xCount3 = last3.filter(x => x === 'X').length;
+        
+        if (tCount3 === 3) {
+            xScore += 30;
+            reasons.push('3 T liên tiếp -> dự đoán Xỉu');
+        } else if (xCount3 === 3) {
+            tScore += 30;
+            reasons.push('3 X liên tiếp -> dự đoán Tài');
+        } else if (tCount3 === 2) {
+            tScore += 20;
+            reasons.push('2/3 phiên là Tài');
+        } else if (xCount3 === 2) {
+            xScore += 20;
+            reasons.push('2/3 phiên là Xỉu');
+        }
+
+        // Rule 3: Phân tích tỷ lệ
+        const tCount = recent.filter(x => x === 'T').length;
+        const xCount = recent.filter(x => x === 'X').length;
+        const total = tCount + xCount;
+        
+        if (Math.abs(tCount - xCount) >= 3) {
+            if (tCount > xCount) {
+                xScore += 25;
+                reasons.push(`${tCount}T/${xCount}X -> dự đoán cân bằng Xỉu`);
+            } else {
+                tScore += 25;
+                reasons.push(`${tCount}T/${xCount}X -> dự đoán cân bằng Tài`);
             }
         }
-        
-        // Rule 6: Luật xen kẽ
-        if (recent.length >= 4) {
-            const last4 = recent.slice(-4);
-            let alternates = 0;
-            for (let i = 1; i < last4.length; i++) {
-                if (last4[i] !== last4[i-1]) alternates++;
-            }
-            
-            if (alternates >= 3) {
-                scores[last4[last4.length-1]] += 15;
-                reasons.push("Mô hình xen kẽ mạnh, dự đoán tiếp tục");
-            }
-        }
-        
-        // Tính toán kết quả cuối cùng
-        const totalScore = scores.T + scores.X;
-        let prediction = null;
-        let confidence = 0;
+
+        // Tính kết quả
+        const totalScore = tScore + xScore;
+        let du_doan = 'tài';
+        let do_tin_cay = 50;
         
         if (totalScore > 0) {
-            if (scores.T > scores.X) {
-                prediction = 'T';
-                confidence = Math.min(95, Math.round((scores.T / totalScore) * 100));
-            } else if (scores.X > scores.T) {
-                prediction = 'X';
-                confidence = Math.min(95, Math.round((scores.X / totalScore) * 100));
-            } else {
-                // Hòa, chọn theo xác suất thống kê
-                const totalGames = this.stats.total_t + this.stats.total_x;
-                if (totalGames > 0) {
-                    const tProb = this.stats.total_t / totalGames;
-                    prediction = tProb >= 0.5 ? 'T' : 'X';
-                    confidence = Math.round(Math.max(tProb, 1 - tProb) * 100);
-                    reasons.push("Các rule cân bằng, chọn theo xác suất thống kê");
-                }
+            if (tScore > xScore) {
+                du_doan = 'tài';
+                do_tin_cay = Math.min(95, Math.round((tScore / totalScore) * 100));
+            } else if (xScore > tScore) {
+                du_doan = 'xỉu';
+                do_tin_cay = Math.min(95, Math.round((xScore / totalScore) * 100));
             }
         }
-        
-        // Nếu vẫn không có prediction
-        if (!prediction) {
-            const totalGames = this.stats.total_t + this.stats.total_x;
-            if (totalGames > 0) {
-                prediction = this.stats.total_t >= this.stats.total_x ? 'T' : 'X';
-                confidence = 50;
-                reasons.push("Không đủ dữ liệu phân tích, dự đoán theo thống kê chung");
-            } else {
-                prediction = Math.random() > 0.5 ? 'T' : 'X';
-                confidence = 40;
-                reasons.push("Chưa có dữ liệu, dự đoán ngẫu nhiên");
-            }
-        }
-        
-        // Tính tỷ lệ
-        const totalGames = this.stats.total_t + this.stats.total_x;
-        const ty_le_tai = totalGames > 0 ? Math.round((this.stats.total_t / totalGames) * 100) : 50;
-        const ty_le_xiu = totalGames > 0 ? Math.round((this.stats.total_x / totalGames) * 100) : 50;
-        
+
+        // Tính tỷ lệ từ lịch sử
+        const allHistory = this.history;
+        const totalT = allHistory.filter(x => x === 'T').length;
+        const totalX = allHistory.filter(x => x === 'X').length;
+        const allTotal = totalT + totalX;
+        const ty_le_tai = allTotal > 0 ? Math.round((totalT / allTotal) * 100) : 50;
+        const ty_le_xiu = allTotal > 0 ? Math.round((totalX / allTotal) * 100) : 50;
+
         return {
-            prediction: prediction,
-            confidence: confidence,
-            reason: reasons.join(' | '),
+            du_doan: du_doan,
+            do_tin_cay: do_tin_cay,
+            ly_do: reasons.length > 0 ? reasons.join(' | ') : 'Dựa trên phân tích cơ bản',
             ty_le_tai: ty_le_tai,
             ty_le_xiu: ty_le_xiu,
-            history_length: this.history.length,
-            stats: {
-                total_t: this.stats.total_t,
-                total_x: this.stats.total_x,
-                streak_t: this.stats.streak_t,
-                streak_x: this.stats.streak_x
-            }
+            history_length: this.history.length
         };
     }
 }
 
 // ============================================
-// GAME WEBSOCKET CLIENT
+// GAME WEBSOCKET CLIENT (GIỮ NGUYÊN)
 // ============================================
 class GameWebSocketClient {
     constructor(url) {
@@ -10319,18 +10157,14 @@ class GameWebSocketClient {
         this.sessionId = null;
         this.latestTxData = null;
         this.latestMd5Data = null;
+        this.lastUpdateTime = {
+            tx: null,
+            md5: null
+        };
         
-        // Hệ thống dự đoán cho 2 bàn
-        this.predictorTX = new TaiXiuPredictionSystem();
-        this.predictorMD5 = new TaiXiuPredictionSystem();
-        
-        // Lưu trữ phiên đã xử lý
-        this.processedSessionsTX = new Set();
-        this.processedSessionsMD5 = new Set();
-        
-        // Lưu kết quả dự đoán trước đó để đánh giá
-        this.lastPredictionTX = null;
-        this.lastPredictionMD5 = null;
+        // Thêm predictor
+        this.predictorTX = new SimplePredictor();
+        this.predictorMD5 = new SimplePredictor();
     }
 
     connect() {
@@ -10468,10 +10302,11 @@ class GameWebSocketClient {
                     const latestSession = gameData.htr.reduce((prev, current) => (current.sid > prev.sid) ? current : prev);
                     console.log(`🎲 Bàn TX - Phiên gần nhất: ${latestSession.sid} (${latestSession.d1},${latestSession.d2},${latestSession.d3})`);
                     this.latestTxData = gameData;
+                    this.lastUpdateTime.tx = new Date();
                     
                     // Cập nhật predictor
-                    this.updatePredictor(gameData.htr, 'tx');
-                    console.log('💾 Đã cập nhật bàn TX');
+                    this.updatePredictorData(gameData.htr, 'tx');
+                    console.log('💾 Đã cập nhật dữ liệu bàn TX');
                 }
             }
             
@@ -10483,16 +10318,19 @@ class GameWebSocketClient {
                     const latestSession = gameData.htr.reduce((prev, current) => (current.sid > prev.sid) ? current : prev);
                     console.log(`🎲 Bàn MD5 - Phiên gần nhất: ${latestSession.sid} (${latestSession.d1},${latestSession.d2},${latestSession.d3})`);
                     this.latestMd5Data = gameData;
+                    this.lastUpdateTime.md5 = new Date();
                     
                     // Cập nhật predictor
-                    this.updatePredictor(gameData.htr, 'md5');
-                    console.log('💾 Đã cập nhật bàn MD5');
+                    this.updatePredictorData(gameData.htr, 'md5');
+                    console.log('💾 Đã cập nhật dữ liệu bàn MD5');
                 }
             }
             
             // Xử lý response authentication
             else if (parsed[0] === 5 && parsed[1] && parsed[1].cmd === 100) {
                 console.log('🔑 Authentication successful!');
+                const userData = parsed[1];
+                console.log(`✅ User: ${userData.u}`);
                 this.isAuthenticated = true;
                 setTimeout(() => {
                     console.log('🔄 Starting to send plugin messages...');
@@ -10503,6 +10341,7 @@ class GameWebSocketClient {
             else if (parsed[0] === 1 && parsed.length >= 5 && parsed[4] === "MiniGame") {
                 console.log('✅ Session initialized');
                 this.sessionId = parsed[3];
+                console.log(`📋 Session ID: ${this.sessionId}`);
             }
             
             else if (parsed[0] === 7) {
@@ -10519,71 +10358,32 @@ class GameWebSocketClient {
         }
     }
 
-    updatePredictor(htr, type) {
+    updatePredictorData(htr, type) {
         const predictor = type === 'tx' ? this.predictorTX : this.predictorMD5;
-        const processedSet = type === 'tx' ? this.processedSessionsTX : this.processedSessionsMD5;
         
-        // Sắp xếp theo sid tăng dần để xử lý đúng thứ tự
+        // Sắp xếp và xử lý dữ liệu
         const sortedHtr = [...htr].sort((a, b) => a.sid - b.sid);
         
         for (const session of sortedHtr) {
-            const sessionKey = `${session.sid}-${type}`;
-            
-            // Kiểm tra nếu session đã xử lý
-            if (!processedSet.has(sessionKey)) {
-                const total = session.d1 + session.d2 + session.d3;
-                const result = total >= 11 ? 'T' : 'X';
-                
-                // Thêm vào predictor
-                predictor.addRealResult(result);
-                
-                processedSet.add(sessionKey);
-                
-                // Kiểm tra dự đoán trước đó
-                const lastPrediction = type === 'tx' ? this.lastPredictionTX : this.lastPredictionMD5;
-                if (lastPrediction) {
-                    const wasCorrect = lastPrediction.prediction === result;
-                    console.log(`📊 ${type.toUpperCase()} Phiên ${session.sid}: Dự đoán ${lastPrediction.prediction === 'T' ? 'Tài' : 'Xỉu'} - Thực tế ${result === 'T' ? 'Tài' : 'Xỉu'} - ${wasCorrect ? '✅ ĐÚNG' : '❌ SAI'}`);
-                }
-            }
-        }
-        
-        // Giới hạn kích thước
-        if (processedSet.size > 500) {
-            const array = Array.from(processedSet);
-            const toRemove = array.slice(0, 250);
-            toRemove.forEach(key => processedSet.delete(key));
+            const total = session.d1 + session.d2 + session.d3;
+            const result = total >= 11 ? 'T' : 'X';
+            predictor.addResult(result);
         }
     }
 
     getLatestTxSession() {
         if (!this.latestTxData || !this.latestTxData.htr || this.latestTxData.htr.length === 0) {
-            return { 
-                error: true,
-                message: "Chưa có dữ liệu bàn TX",
-                phien_hien_tai: 0
-            };
+            return { error: "Không có dữ liệu bàn TX", message: "Chưa nhận được dữ liệu từ server hoặc dữ liệu trống" };
         }
-        
         try {
             const latestSession = this.latestTxData.htr.reduce((prev, current) => (current.sid > prev.sid) ? current : prev);
             const tong = latestSession.d1 + latestSession.d2 + latestSession.d3;
             const ket_qua = (tong >= 11) ? "tài" : "xỉu";
             
-            // Lấy dự đoán cho phiên tiếp theo
-            const prediction = this.predictorTX.predictNext();
-            this.lastPredictionTX = prediction;
-            
-            // Kiểm tra kết quả dự đoán trước
-            let ketqua_ddoan = "chưa có";
-            if (this.predictorTX.history.length >= 2) {
-                const lastResult = this.predictorTX.history[this.predictorTX.history.length - 1];
-                const secondLastResult = this.predictorTX.history[this.predictorTX.history.length - 2];
-                ketqua_ddoan = `Phiên trước: ${secondLastResult === 'T' ? 'Tài' : 'Xỉu'} -> Dự đoán: ${lastResult === 'T' ? 'Tài' : 'Xỉu'}`;
-            }
+            // Lấy dự đoán từ predictor
+            const prediction = this.predictorTX.predict();
             
             return {
-                error: false,
                 phien: latestSession.sid,
                 phien_hien_tai: parseInt(latestSession.sid) + 1,
                 xuc_xac_1: latestSession.d1,
@@ -10591,53 +10391,33 @@ class GameWebSocketClient {
                 xuc_xac_3: latestSession.d3,
                 tong: tong,
                 ket_qua: ket_qua,
-                du_doan: prediction.prediction ? (prediction.prediction === 'T' ? 'tài' : 'xỉu') : 'đang phân tích',
-                do_tin_cay: prediction.confidence,
-                ly_do: prediction.reason,
+                // Thêm dự đoán
+                du_doan: prediction.du_doan,
+                do_tin_cay: prediction.do_tin_cay,
+                ly_do: prediction.ly_do,
                 ty_le_tai: prediction.ty_le_tai,
                 ty_le_xiu: prediction.ty_le_xiu,
-                ketqua_ddoan: ketqua_ddoan,
                 history_length: prediction.history_length,
-                stats: prediction.stats,
-                learned_patterns: Object.keys(this.predictorTX.learnedPatterns).length
+                ban: "tai_xiu"
             };
         } catch (error) {
-            return { 
-                error: true,
-                message: "Lỗi xử lý dữ liệu TX: " + error.message,
-                phien_hien_tai: 0
-            };
+            return { error: "Lỗi xử lý dữ liệu TX", message: error.message };
         }
     }
 
     getLatestMd5Session() {
         if (!this.latestMd5Data || !this.latestMd5Data.htr || this.latestMd5Data.htr.length === 0) {
-            return { 
-                error: true,
-                message: "Chưa có dữ liệu bàn MD5",
-                phien_hien_tai: 0
-            };
+            return { error: "Không có dữ liệu bàn MD5", message: "Chưa nhận được dữ liệu từ server hoặc dữ liệu trống" };
         }
-        
         try {
             const latestSession = this.latestMd5Data.htr.reduce((prev, current) => (current.sid > prev.sid) ? current : prev);
             const tong = latestSession.d1 + latestSession.d2 + latestSession.d3;
             const ket_qua = (tong >= 11) ? "tài" : "xỉu";
             
-            // Lấy dự đoán cho phiên tiếp theo
-            const prediction = this.predictorMD5.predictNext();
-            this.lastPredictionMD5 = prediction;
-            
-            // Kiểm tra kết quả dự đoán trước
-            let ketqua_ddoan = "chưa có";
-            if (this.predictorMD5.history.length >= 2) {
-                const lastResult = this.predictorMD5.history[this.predictorMD5.history.length - 1];
-                const secondLastResult = this.predictorMD5.history[this.predictorMD5.history.length - 2];
-                ketqua_ddoan = `Phiên trước: ${secondLastResult === 'T' ? 'Tài' : 'Xỉu'} -> Dự đoán: ${lastResult === 'T' ? 'Tài' : 'Xỉu'}`;
-            }
+            // Lấy dự đoán từ predictor
+            const prediction = this.predictorMD5.predict();
             
             return {
-                error: false,
                 phien: latestSession.sid,
                 phien_hien_tai: parseInt(latestSession.sid) + 1,
                 xuc_xac_1: latestSession.d1,
@@ -10645,22 +10425,17 @@ class GameWebSocketClient {
                 xuc_xac_3: latestSession.d3,
                 tong: tong,
                 ket_qua: ket_qua,
-                du_doan: prediction.prediction ? (prediction.prediction === 'T' ? 'tài' : 'xỉu') : 'đang phân tích',
-                do_tin_cay: prediction.confidence,
-                ly_do: prediction.reason,
+                // Thêm dự đoán
+                du_doan: prediction.du_doan,
+                do_tin_cay: prediction.do_tin_cay,
+                ly_do: prediction.ly_do,
                 ty_le_tai: prediction.ty_le_tai,
                 ty_le_xiu: prediction.ty_le_xiu,
-                ketqua_ddoan: ketqua_ddoan,
                 history_length: prediction.history_length,
-                stats: prediction.stats,
-                learned_patterns: Object.keys(this.predictorMD5.learnedPatterns).length
+                ban: "md5"
             };
         } catch (error) {
-            return { 
-                error: true,
-                message: "Lỗi xử lý dữ liệu MD5: " + error.message,
-                phien_hien_tai: 0
-            };
+            return { error: "Lỗi xử lý dữ liệu MD5", message: error.message };
         }
     }
 
@@ -10696,27 +10471,29 @@ class GameWebSocketClient {
 }
 
 // ============================================
-// EXPRESS SERVER
+// EXPRESS SERVER (GIỮ NGUYÊN)
 // ============================================
 const app = express();
 const PORT = 3000;
 app.use(cors());
 app.use(express.json());
 
-// Tạo WebSocket client
+// Tạo WebSocket client với URL mới
 const client = new GameWebSocketClient(
     'wss://api.apixoc88.net/websocket?d=YlcxaGIyZGlhMjQ9fDUzMjd8MTc2NjU1Nzg1NzU2NXw5NGRiMGI5NGM2NjNiODViNWUxMzY3NjkzMjg3NGY3OXwyM2ZlN2IwNGY2MWE0ODA4NTljNWUyY2I4NTI3NGY4Ng=='
 );
 client.connect();
 
-// Routes API
+// Routes API (GIỮ NGUYÊN, CHỈ THÊM DỰ ĐOÁN VÀO RESPONSE)
 app.get('/api/tx', (req, res) => {
     const data = client.getLatestTxSession();
+    if (data.error) return res.status(404).json(data);
     res.json(data);
 });
 
 app.get('/api/md5', (req, res) => {
     const data = client.getLatestMd5Session();
+    if (data.error) return res.status(404).json(data);
     res.json(data);
 });
 
@@ -10724,15 +10501,14 @@ app.get('/api/all', (req, res) => {
     const txSession = client.getLatestTxSession();
     const md5Session = client.getLatestMd5Session();
     res.json({
-        tai_xiu: txSession,
-        md5: md5Session
+        tai_xiu: txSession.error ? { error: txSession.error } : txSession,
+        md5: md5Session.error ? { error: md5Session.error } : md5Session
     });
 });
 
 app.get('/api/status', (req, res) => {
     const hasTxData = client.latestTxData && client.latestTxData.htr && client.latestTxData.htr.length > 0;
     const hasMd5Data = client.latestMd5Data && client.latestMd5Data.htr && client.latestMd5Data.htr.length > 0;
-    
     res.json({
         status: "running",
         websocket_connected: client.ws ? client.ws.readyState === WebSocket.OPEN : false,
@@ -10741,8 +10517,7 @@ app.get('/api/status', (req, res) => {
         has_md5_data: hasMd5Data,
         tx_history_count: client.predictorTX.history.length,
         md5_history_count: client.predictorMD5.history.length,
-        tx_learned_patterns: Object.keys(client.predictorTX.learnedPatterns).length,
-        md5_learned_patterns: Object.keys(client.predictorMD5.learnedPatterns).length
+        cau_da_hoc: 32
     });
 });
 
@@ -10759,7 +10534,7 @@ app.get('/', (req, res) => {
     res.send(`
         <html>
             <head>
-                <title>🎲 Xóc88 API với Dự đoán Nâng cao</title>
+                <title>🎲 Xóc88 API</title>
                 <style>
                     body { font-family: Arial, sans-serif; margin: 40px; background: #f0f2f5; }
                     h1 { color: #333; text-align: center; }
@@ -10773,19 +10548,17 @@ app.get('/', (req, res) => {
                     .disconnected { background: #f8d7da; color: #721c24; }
                     .btn { background: #1890ff; color: white; padding: 10px 15px; border: none; border-radius: 5px; cursor: pointer; margin: 5px; }
                     .btn:hover { background: #40a9ff; }
-                    .board { padding: 10px; margin: 5px; border-radius: 5px; }
+                    .board { display: inline-block; padding: 10px; margin: 5px; border-radius: 5px; }
                     .board-tx { background: #e6f7ff; border: 1px solid #91d5ff; }
                     .board-md5 { background: #f6ffed; border: 1px solid #b7eb8f; }
                     .prediction-info { background: #fff7e6; padding: 10px; border-radius: 5px; margin-top: 10px; border-left: 4px solid #faad14; }
                     .tai { color: #ff4d4f; font-weight: bold; }
                     .xiu { color: #1890ff; font-weight: bold; }
-                    .confidence-bar { height: 10px; background: #e0e0e0; border-radius: 5px; margin: 5px 0; overflow: hidden; }
-                    .confidence-fill { height: 100%; background: linear-gradient(90deg, #ff4d4f, #1890ff); }
                 </style>
             </head>
             <body>
                 <div class="container">
-                    <h1>🎲 Xóc88 API với Dự đoán Nâng cao</h1>
+                    <h1>🎲 Xóc88 API với Dự đoán</h1>
                     
                     <div id="status" class="endpoint">
                         <h2>📡 Đang kiểm tra trạng thái...</h2>
@@ -10798,7 +10571,7 @@ app.get('/', (req, res) => {
                             <li><code>GET <a class="api-link" href="/api/md5" target="_blank">/api/md5</a></code> - Bàn MD5</li>
                             <li><code>GET <a class="api-link" href="/api/all" target="_blank">/api/all</a></code> - Cả 2 bàn</li>
                             <li><code>GET <a class="api-link" href="/api/status" target="_blank">/api/status</a></code> - Trạng thái</li>
-                            <li><code>GET <a class="api-link" href="/api/refresh" target="_blank">/api/refresh</a></code> - Refresh</li>
+                            <li><code>GET <a class="api-link" href="/api/refresh" target="_blank">/api/refresh</a></code> - Refresh dữ liệu</li>
                         </ul>
                     </div>
                     
@@ -10807,8 +10580,7 @@ app.get('/', (req, res) => {
                         <button class="btn" onclick="getTX()">🎲 Lấy Bàn TX</button>
                         <button class="btn" onclick="getMD5()">🔐 Lấy Bàn MD5</button>
                         <button class="btn" onclick="getAll()">📊 Lấy Cả 2</button>
-                        <button class="btn" onclick="refreshData()">🔄 Refresh</button>
-                        <button class="btn" onclick="updateStatus()">🔄 Cập nhật Status</button>
+                        <button class="btn" onclick="refreshData()">🔄 Refresh Data</button>
                     </div>
                     
                     <div id="data-display" class="endpoint">
@@ -10825,21 +10597,26 @@ app.get('/', (req, res) => {
                             .then(data => {
                                 const statusDiv = document.getElementById('status');
                                 const isConnected = data.websocket_connected;
+                                const hasTxData = data.has_tx_data;
+                                const hasMd5Data = data.has_md5_data;
                                 
                                 statusDiv.innerHTML = \`
                                     <h2>📡 Trạng thái hệ thống:</h2>
                                     <div class="status \${isConnected ? 'connected' : 'disconnected'}">
                                         <p><strong>WebSocket:</strong> \${isConnected ? '✅ Đã kết nối' : '❌ Mất kết nối'}</p>
                                         <p><strong>Xác thực:</strong> \${data.authenticated ? '✅ Đã xác thực' : '⏳ Chưa xác thực'}</p>
-                                        <p><strong>Bàn TX:</strong> \${data.has_tx_data ? '✅ Có dữ liệu (' + data.tx_history_count + ' phiên)' : '⏳ Đang chờ'}</p>
-                                        <p><strong>Bàn MD5:</strong> \${data.has_md5_data ? '✅ Có dữ liệu (' + data.md5_history_count + ' phiên)' : '⏳ Đang chờ'}</p>
-                                        <p><strong>Patterns TX:</strong> \${data.tx_learned_patterns} patterns đã học</p>
-                                        <p><strong>Patterns MD5:</strong> \${data.md5_learned_patterns} patterns đã học</p>
+                                        <div class="board board-tx">
+                                            <p><strong>Bàn TX:</strong> \${hasTxData ? '✅ Có dữ liệu (' + data.tx_history_count + ' phiên)' : '⏳ Đang chờ'}</p>
+                                        </div>
+                                        <div class="board board-md5">
+                                            <p><strong>Bàn MD5:</strong> \${hasMd5Data ? '✅ Có dữ liệu (' + data.md5_history_count + ' phiên)' : '⏳ Đang chờ'}</p>
+                                        </div>
+                                        <p><strong>📚 Cầu đã học:</strong> \${data.cau_da_hoc || 0}</p>
                                     </div>
                                 \`;
                                 
-                                if (data.has_tx_data) getTX();
-                                if (data.has_md5_data) getMD5();
+                                if (hasTxData) getTX();
+                                if (hasMd5Data) getMD5();
                             });
                     }
                     
@@ -10847,17 +10624,15 @@ app.get('/', (req, res) => {
                         fetch('/api/tx')
                             .then(response => response.json())
                             .then(data => {
-                                const display = document.getElementById('tx-data');
                                 if (data.error) {
-                                    display.innerHTML = \`
+                                    document.getElementById('tx-data').innerHTML = \`
                                         <div class="board board-tx">
                                             <h3>🎲 Bàn Tài Xỉu</h3>
-                                            <p>❌ \${data.message}</p>
+                                            <p>❌ \${data.error}</p>
                                         </div>
                                     \`;
                                 } else {
-                                    const confidenceWidth = data.do_tin_cay + '%';
-                                    display.innerHTML = \`
+                                    document.getElementById('tx-data').innerHTML = \`
                                         <div class="board board-tx">
                                             <h3>🎲 Bàn Tài Xỉu</h3>
                                             <p><strong>📅 Phiên hiện tại:</strong> \${data.phien}</p>
@@ -10868,14 +10643,9 @@ app.get('/', (req, res) => {
                                             <div class="prediction-info">
                                                 <p><strong>🔮 Dự đoán phiên \${data.phien_hien_tai}:</strong> <span class="\${data.du_doan}">\${data.du_doan}</span></p>
                                                 <p><strong>💯 Độ tin cậy:</strong> \${data.do_tin_cay}%</p>
-                                                <div class="confidence-bar">
-                                                    <div class="confidence-fill" style="width: \${confidenceWidth}"></div>
-                                                </div>
                                                 <p><strong>📝 Lý do:</strong> \${data.ly_do}</p>
                                                 <p><strong>📊 Tỷ lệ thống kê:</strong> Tài \${data.ty_le_tai}% | Xỉu \${data.ty_le_xiu}%</p>
-                                                <p><strong>📈 Kết quả dự đoán trước:</strong> \${data.ketqua_ddoan}</p>
-                                                <p><strong>📚 Lịch sử học:</strong> \${data.history_length} phiên | \${data.learned_patterns} patterns</p>
-                                                <p><strong>📊 Thống kê:</strong> Tài: \${data.stats.total_t} | Xỉu: \${data.stats.total_x} | Streak T: \${data.stats.streak_t} | Streak X: \${data.stats.streak_x}</p>
+                                                <p><strong>📈 Lịch sử học:</strong> \${data.history_length} phiên</p>
                                             </div>
                                         </div>
                                     \`;
@@ -10887,17 +10657,15 @@ app.get('/', (req, res) => {
                         fetch('/api/md5')
                             .then(response => response.json())
                             .then(data => {
-                                const display = document.getElementById('md5-data');
                                 if (data.error) {
-                                    display.innerHTML = \`
+                                    document.getElementById('md5-data').innerHTML = \`
                                         <div class="board board-md5">
                                             <h3>🔐 Bàn MD5</h3>
-                                            <p>❌ \${data.message}</p>
+                                            <p>❌ \${data.error}</p>
                                         </div>
                                     \`;
                                 } else {
-                                    const confidenceWidth = data.do_tin_cay + '%';
-                                    display.innerHTML = \`
+                                    document.getElementById('md5-data').innerHTML = \`
                                         <div class="board board-md5">
                                             <h3>🔐 Bàn MD5</h3>
                                             <p><strong>📅 Phiên hiện tại:</strong> \${data.phien}</p>
@@ -10908,14 +10676,9 @@ app.get('/', (req, res) => {
                                             <div class="prediction-info">
                                                 <p><strong>🔮 Dự đoán phiên \${data.phien_hien_tai}:</strong> <span class="\${data.du_doan}">\${data.du_doan}</span></p>
                                                 <p><strong>💯 Độ tin cậy:</strong> \${data.do_tin_cay}%</p>
-                                                <div class="confidence-bar">
-                                                    <div class="confidence-fill" style="width: \${confidenceWidth}"></div>
-                                                </div>
                                                 <p><strong>📝 Lý do:</strong> \${data.ly_do}</p>
                                                 <p><strong>📊 Tỷ lệ thống kê:</strong> Tài \${data.ty_le_tai}% | Xỉu \${data.ty_le_xiu}%</p>
-                                                <p><strong>📈 Kết quả dự đoán trước:</strong> \${data.ketqua_ddoan}</p>
-                                                <p><strong>📚 Lịch sử học:</strong> \${data.history_length} phiên | \${data.learned_patterns} patterns</p>
-                                                <p><strong>📊 Thống kê:</strong> Tài: \${data.stats.total_t} | Xỉu: \${data.stats.total_x} | Streak T: \${data.stats.streak_t} | Streak X: \${data.stats.streak_x}</p>
+                                                <p><strong>📈 Lịch sử học:</strong> \${data.history_length} phiên</p>
                                             </div>
                                         </div>
                                     \`;
