@@ -1,22 +1,21 @@
 {
-  "name": "xoc88-advanced",
-  "version": "3.0.0",
-  "description": "Xóc88 API với hệ thống dự đoán nâng cao",
+  "name": "xoc88-api-proxy",
+  "version": "1.0.0",
+  "description": "Proxy API for xoc88 with field name transformation",
   "main": "xoc88.js",
   "scripts": {
     "start": "node xoc88.js",
-    "dev": "nodemon xoc88.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "nodemon xoc88.js"
   },
-  "keywords": ["xoc88", "taixiu", "prediction", "gambling", "api"],
-  "author": "Xóc88 Team",
-  "license": "MIT",
+  "keywords": ["xoc88", "api", "proxy", "nodejs"],
+  "author": "",
+  "license": "ISC",
   "dependencies": {
-    "ws": "^8.17.0",
     "express": "^4.18.2",
+    "axios": "^1.6.0",
     "cors": "^2.8.5"
   },
-  "engines": {
-    "node": ">=14.0.0"
+  "devDependencies": {
+    "nodemon": "^3.0.1"
   }
 }
